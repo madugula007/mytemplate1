@@ -1,0 +1,24 @@
+AppName: go-pos
+AppEnv: test
+#AppEnv: production
+
+HttpUrl: 127.0.0.1
+HttpPort: 8080
+HttpAllowedOrigins: "*"
+loglevel: debug
+
+DBConnection: postgres
+DBHost: localhost
+DBPort: 5432
+DBdatabase: templatedatabase
+DBUsername: postgres
+DBPassword: secret
+
+
+RedisServer: localhost:6379
+RedisPassword: 
+
+TokenSymmetricKey: 12345678901234567890123456789012
+TokenDuration: 15m
+ShutDownTime: 1ms
+ShutDowntype: 
