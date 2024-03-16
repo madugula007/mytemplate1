@@ -2,8 +2,21 @@ package repository
 
 import (
 	"database/sql"
+	//"fmt"
 
 	sq "github.com/Masterminds/squirrel"
+
+	"github.com/jackc/pgx/v5"
+
+	//"github.com/jackc/pgx/v5"
+	//"github.com/jackc/pgx/v5/pgxpool"
+
+	"context"
+
+	"reflect"
+	//"time"
+
+	"github.com/Masterminds/squirrel"
 )
 
 /**
@@ -61,3 +74,61 @@ func nullFloat64(value float64) sql.NullFloat64 {
 		Valid:   true,
 	}
 }
+
+func QueryWithSquirrel[T any](ctx context.Context, db *DB, stmt squirrel.SelectBuilder, resultSlice interface{}) error {
+	sql, args, err := stmt.ToSql()
+	if err != nil {
+		return err
+	}
+
+	rows, err := db.Query(ctx, sql, args...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	results := reflect.ValueOf(resultSlice)
+	elementType := results.Type().Elem()
+	//fmt.Println("Rows", rows)
+	for rows.Next() {
+		result := reflect.New(elementType).Interface()
+		if err := rows.Scan(result); err != nil {
+			return err
+		}
+		results = reflect.Append(results, reflect.ValueOf(result).Elem())
+	}
+
+	return nil
+}
+
+type TableSchema struct {
+	TableName   string
+	FieldNames  []string
+	FieldTypes  []reflect.Type
+	FieldValues []any
+}
+
+func copyRows[T any](rows pgx.Rows, destination []*T, schema *TableSchema) error {
+	numFields := len(schema.FieldNames)
+
+	for i := 0; i < numFields; i++ {
+		schema.FieldValues[i] = reflect.New(schema.FieldTypes[i]).Interface()
+	}
+
+	for rows.Next() {
+		err := rows.Scan(schema.FieldValues...)
+		if err != nil {
+			return err
+		}
+
+		for i, fieldValue := range schema.FieldValues {
+			destElement := reflect.ValueOf(destination).Elem()
+			field := destElement.FieldByName(schema.FieldNames[i])
+			field.Set(reflect.ValueOf(fieldValue))
+		}
+	}
+
+	return nil
+}
+
+// Select executes sql with args on db and returns the []T produced by scanFn.

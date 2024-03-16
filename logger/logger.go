@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/rs/zerolog"
 )
@@ -17,17 +18,68 @@ type Interface interface {
 	Fatal(message interface{}, args ...interface{})
 }
 
+var (
+	instance *Logger
+	once     sync.Once
+)
+
 // Logger -.
 type Logger struct {
 	logger *zerolog.Logger
+	once   sync.Once
 }
 
 var _ Interface = (*Logger)(nil)
 
-// New -.
-func New(level string) *Logger {
-	var l zerolog.Level
+// func New() *Logger {
+// 	if instance == nil {
+// 		instance = &Logger{}
+// 	}
+// 	return instance
+// }
 
+// func (l *Logger) Initialize() {
+// 	l.once.Do(func() {
+// 		zerolog.SetGlobalLevel(zerolog.InfoLevel)
+
+// 		skipFrameCount := 3
+// 		logger := zerolog.New(os.Stdout).With().Timestamp().CallerWithSkipFrameCount(zerolog.CallerSkipFrameCount + skipFrameCount).Logger()
+// 		l.logger = &logger
+// 	})
+// }
+
+// New -.
+func New() *Logger {
+	//var l zerolog.Level
+	once.Do(func() {
+		// switch strings.ToLower(level) {
+		// case "error":
+		// 	l = zerolog.ErrorLevel
+		// case "warn":
+		// 	l = zerolog.WarnLevel
+		// case "info":
+		// 	l = zerolog.InfoLevel
+		// case "debug":
+		// 	l = zerolog.DebugLevel
+		// default:
+		// 	l = zerolog.InfoLevel
+		// }
+
+		zerolog.SetGlobalLevel(zerolog.InfoLevel)
+
+		skipFrameCount := 3
+		logger := zerolog.New(os.Stdout).With().Timestamp().CallerWithSkipFrameCount(zerolog.CallerSkipFrameCount + skipFrameCount).Logger()
+
+		instance = &Logger{
+			logger: &logger,
+		}
+	})
+	return instance
+}
+
+func (log *Logger) SetLevel(level string) {
+	//log.Initialize()
+	var l zerolog.Level
 	switch strings.ToLower(level) {
 	case "error":
 		l = zerolog.ErrorLevel
@@ -39,16 +91,10 @@ func New(level string) *Logger {
 		l = zerolog.DebugLevel
 	default:
 		l = zerolog.InfoLevel
+
 	}
 
 	zerolog.SetGlobalLevel(l)
-
-	skipFrameCount := 3
-	logger := zerolog.New(os.Stdout).With().Timestamp().CallerWithSkipFrameCount(zerolog.CallerSkipFrameCount + skipFrameCount).Logger()
-
-	return &Logger{
-		logger: &logger,
-	}
 }
 
 // Debug -.
@@ -86,7 +132,7 @@ func (l *Logger) Fatal(message interface{}, args ...interface{}) {
 
 func (l *Logger) log(level zerolog.Level, message string, args ...interface{}) {
 
-	fmt.Println("log level:", l.logger.GetLevel())
+	//fmt.Println("log level:", l.logger.GetLevel())
 	loggers := l.logger.WithLevel(level)
 	if len(args) == 0 {
 		loggers.Msg(message)

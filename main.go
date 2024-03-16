@@ -1,10 +1,19 @@
+// @title Demo Template
+// @version 1.0
+// @description This is a  Demo Template API with Swagger documentation
+// @host localhost:8080
+// @BasePath /v1
+
 package main
 
 import (
 	"context"
+	
+	
 	config "gotemplate/config"
+	"sync"
 
-	//handler "gotemplate/handler"
+	"gotemplate/handler"
 	"gotemplate/logger"
 	repo "gotemplate/repo/postgres"
 	r "gotemplate/route"
@@ -13,81 +22,100 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/gin-gonic/gin"
 )
 
-func init() {
-	config.Load()
-}
+var c config.Econfig
+var log *logger.Logger
+var validatorService *handler.ValidatorService
 
-func LoggerInit(loglevel string) *logger.Logger {
-	log := logger.New(loglevel)
+
+
+func LoggerInit() *logger.Logger {
+	log := logger.New()
 	return log
 }
 
+func validation() error {
+	tagToNumber := handler.GetTagToNumberMap()
+	errordbMap := handler.GetErrordbMap()
+	var err error
+	validatorService, err = handler.NewValidatorService(tagToNumber, errordbMap)
+	if err != nil {
+		return err
+	}
+	err = validatorService.RegisterCustomValidation("myvalidate", handler.Myvalidate, "must be equal to 10", "CST1")
+	if err != nil {
+		return err
+	}
+
+	err = validatorService.RegisterCustomValidation("hourvalidate", handler.HourValidate, "Pass correct hour", "CST2")
+	if err != nil {
+		return err
+	}
+	return nil
+}
 func main() {
+	log = LoggerInit()
+	c = config.Load(log)
+	log.SetLevel(c.LogLevel())
 
-	log := LoggerInit(os.Getenv("LOG_LEVEL"))
+	listenAddr := ":" + c.HttpPort()
 
-	log.Debug("Hi... Am I visible")
-	log.Info("This is Info")
-	log.Error("This is error")
-	log.Warn("This is warning")
-	listenAddr := ":" + os.Getenv("HTTP_PORT")
-	ctx := context.Background()
-	db, err := repo.NewDB(ctx)
+	duration, err := time.ParseDuration(c.ShutDownTime())
+	if err != nil {
+		log.Error("Error in parsing duration", err.Error())
+	}
+
+	err = validation()
+	if err != nil {
+		log.Error("Error initialising validation:", err.Error())
+
+	}
+	shutdownctx, shutdowncancel := context.WithTimeout(context.Background(), duration)
+	defer shutdowncancel()
+	log.Debug("listenaddr:", listenAddr)
+
+	ctx, contextCancel := context.WithTimeout(shutdownctx, 10*time.Second)
+	defer contextCancel()
+
+	db, err := repo.NewDB(ctx, c)
 	if err != nil {
 		log.Warn("error in db connection %s", err)
 	}
 	defer db.Close()
-	log.Info("Successfully connected to the database %s", os.Getenv("DB_CONNECTION"))
+	log.Info("Successfully connected to the database %s", c.DBConnection())
 
-	router, err := r.Routes(db, log)
+	router, err := r.Routes(db, log, c, validatorService)
 
-	/*userRepo := repo.NewUserRepository(db, log)
-
-	userHandler := handler.NewUserHandler(*userRepo, log)
-
-	paymentRepo := repo.NewPaymentRepository(db)
-	paymentHandler := handler.NewPaymentHandler(*paymentRepo)
-
-	// Category
-	categoryRepo := repo.NewCategoryRepository(db)
-	categoryHandler := handler.NewCategoryHandler(*categoryRepo)
-
-	// Product
-	productRepo := repo.NewProductRepository(db)
-	productHandler := handler.NewProductHandler(*productRepo)
-
-	// Order
-	orderRepo := repo.NewOrderRepository(db)
-	orderHandler := handler.NewOrderHandler(*orderRepo)
-
-
-
-	router, err := handler.NewRouter(
-		*userHandler,
-		*paymentHandler,
-		*categoryHandler,
-		*productHandler,
-		*orderHandler,
-	)*/
 	if err != nil {
-		log.Warn("Error initializing router %s", err)
+		log.Warn("Error initializing router %s", err.Error())
 		os.Exit(1)
-
 	}
 
 	log.Info("Starting the HTTP server: %s", listenAddr)
+	var wg sync.WaitGroup
 
+	router.Use(func(c *gin.Context) {
+		if c.Request.URL.Path != "/healthz" {
+			wg.Add(1)
+			defer wg.Done()
+		}
+		c.Next()
+	})
+
+
+	
 	srv := &http.Server{
-		Addr:    ":" + os.Getenv("HTTP_PORT"),
+		Addr:    ":" + c.HttpPort(),
 		Handler: router,
 	}
 
 	go func() {
 
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Info("listen: %s\n", err)
+			log.Info("listen: %s\n", err.Error())
 		}
 	}()
 
@@ -95,21 +123,17 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	sig := <-quit
 	log.Info("Received signal...%s", sig)
+	handler.SetIsShuttingDown(true)
 
-	duration, err := time.ParseDuration(os.Getenv("SHUTDOWN_TIME"))
-	if err != nil {
-		log.Fatal("Error in parsing duration", err)
+	go func() {
+		if err := srv.Shutdown(shutdownctx); err != nil {
+			log.Error("Server Shutdown error:", err.Error())
+		}
+	}()
+	wg.Wait()
+	db.Close()
 
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), duration)
-
-	defer cancel()
-	if err := srv.Shutdown(ctx); err != nil {
-		log.Fatal("Server Shutdown error:", err)
-	}
-	// catching ctx.Done(). timeout of 5 seconds.
-	<-ctx.Done()
+	<-shutdownctx.Done()
 	log.Info("Server exiting")
 
 }

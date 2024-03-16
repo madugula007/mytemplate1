@@ -2,7 +2,8 @@ package handler
 
 import (
 	"gotemplate/core/domain"
-	
+	"gotemplate/logger"
+
 	repo "gotemplate/repo/postgres"
 
 	"github.com/gin-gonic/gin"
@@ -11,18 +12,22 @@ import (
 // CategoryHandler represents the HTTP handler for category-related requests
 type CategoryHandler struct {
 	svc repo.CategoryRepository
+	log *logger.Logger
+	vs *ValidatorService
 }
 
 // NewCategoryHandler creates a new CategoryHandler instance
-func NewCategoryHandler(svc repo.CategoryRepository) *CategoryHandler {
+func NewCategoryHandler(svc repo.CategoryRepository, log *logger.Logger,vs *ValidatorService) *CategoryHandler {
 	return &CategoryHandler{
 		svc,
+		log,
+		vs,
 	}
 }
 
 // createCategoryRequest represents a request body for creating a new category
 type createCategoryRequest struct {
-	Name string `json:"name" binding:"required" example:"Foods"`
+	Name string `json:"name" validate:"required" example:"Foods"`
 }
 
 // CreateCategory godoc
@@ -34,28 +39,31 @@ type createCategoryRequest struct {
 //	@Produce		json
 //	@Param			createCategoryRequest	body		createCategoryRequest	true	"Create category request"
 //	@Success		200						{object}	categoryResponse		"Category created"
-//	@Failure		400						{object}	errorResponse			"Validation error"
-//	@Failure		401						{object}	errorResponse			"Unauthorized error"
-//	@Failure		403						{object}	errorResponse			"Forbidden error"
-//	@Failure		404						{object}	errorResponse			"Data not found error"
-//	@Failure		409						{object}	errorResponse			"Data conflict error"
-//	@Failure		500						{object}	errorResponse			"Internal server error"
+//	@Failure		400						{object}	errorValidResponse			"Validation error"
+//	@Failure		401						{object}	errorValidResponse			"Unauthorized error"
+//	@Failure		403						{object}	errorValidResponse			"Forbidden error"
+//	@Failure		404						{object}	errorValidResponse			"Data not found error"
+//	@Failure		409						{object}	errorValidResponse			"Data conflict error"
+//	@Failure		500						{object}	errorValidResponse			"Internal server error"
 //	@Router			/categories [post]
-//	@Security		BearerAuth
+
 func (ch *CategoryHandler) CreateCategory(ctx *gin.Context) {
 	var req createCategoryRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		validationError(ctx, err)
+		ch.vs.handleError(ctx, err)
 		return
 	}
-
+	if !ch.vs.handleValidation(ctx, req) {
+		return
+	}
 	category := domain.Category{
 		Name: req.Name,
 	}
 
 	_, err := ch.svc.CreateCategory(ctx, &category)
 	if err != nil {
-		handleError(ctx, err)
+		ch.log.Error(err.Error())
+		ch.vs.handledbError(ctx, err)
 		return
 	}
 
@@ -66,7 +74,7 @@ func (ch *CategoryHandler) CreateCategory(ctx *gin.Context) {
 
 // getCategoryRequest represents a request body for retrieving a category
 type getCategoryRequest struct {
-	ID uint64 `uri:"id" binding:"required,min=1" example:"1"`
+	ID uint64 `uri:"id" validate:"required,min=1" example:"1"`
 }
 
 // GetCategory godoc
@@ -78,21 +86,23 @@ type getCategoryRequest struct {
 //	@Produce		json
 //	@Param			id	path		uint64				true	"Category ID"
 //	@Success		200	{object}	categoryResponse	"Category retrieved"
-//	@Failure		400	{object}	errorResponse		"Validation error"
-//	@Failure		404	{object}	errorResponse		"Data not found error"
-//	@Failure		500	{object}	errorResponse		"Internal server error"
+//	@Failure		400	{object}	errorValidResponse		"Validation error"
+//	@Failure		404	{object}	errorValidResponse		"Data not found error"
+//	@Failure		500	{object}	errorValidResponse		"Internal server error"
 //	@Router			/categories/{id} [get]
-//	@Security		BearerAuth
 func (ch *CategoryHandler) GetCategory(ctx *gin.Context) {
 	var req getCategoryRequest
 	if err := ctx.ShouldBindUri(&req); err != nil {
-		validationError(ctx, err)
+		ch.vs.handleError(ctx, err)
 		return
 	}
-
+	if !ch.vs.handleValidation(ctx, req) {
+		return
+	}
 	category, err := ch.svc.GetCategoryByID(ctx, req.ID)
 	if err != nil {
-		handleError(ctx, err)
+		ch.log.Error(err.Error())
+		ch.vs.handledbError(ctx, err)
 		return
 	}
 
@@ -103,8 +113,8 @@ func (ch *CategoryHandler) GetCategory(ctx *gin.Context) {
 
 // listCategoriesRequest represents a request body for listing categories
 type listCategoriesRequest struct {
-	Skip  uint64 `form:"skip" binding:"required,min=0" example:"0"`
-	Limit uint64 `form:"limit" binding:"required,min=5" example:"5"`
+	Skip  uint64 `form:"skip" validate:"required,min=0" example:"0"`
+	Limit uint64 `form:"limit" validate:"required,min=5" example:"5"`
 }
 
 // ListCategories godoc
@@ -116,40 +126,37 @@ type listCategoriesRequest struct {
 //	@Produce		json
 //	@Param			skip	query		uint64			true	"Skip"
 //	@Param			limit	query		uint64			true	"Limit"
-//	@Success		200		{object}	meta			"Categories displayed"
-//	@Failure		400		{object}	errorResponse	"Validation error"
-//	@Failure		500		{object}	errorResponse	"Internal server error"
-//	@Router			/categories [get]
-//	@Security		BearerAuth
+//	@Success		200		{object}	categoryResponse			"Categories displayed"
+//	@Failure		400		{object}	errorValidResponse	"Validation error"
+//	@Failure		500		{object}	errorValidResponse	"Internal server error"
+//	@Router			/categories/ [get]
 func (ch *CategoryHandler) ListCategories(ctx *gin.Context) {
 	var req listCategoriesRequest
-	var categoriesList []categoryResponse
 
 	if err := ctx.ShouldBindQuery(&req); err != nil {
-		validationError(ctx, err)
+		ch.vs.handleError(ctx, err)
 		return
 	}
-
+	if !ch.vs.handleValidation(ctx, req) {
+		return
+	}
 	categories, err := ch.svc.ListCategories(ctx, req.Skip, req.Limit)
 	if err != nil {
-		handleError(ctx, err)
+		ch.log.Error(err.Error())
+		ch.vs.handledbError(ctx, err)
 		return
 	}
 
-	for _, category := range categories {
-		categoriesList = append(categoriesList, newCategoryResponse(&category))
-	}
-
-	total := uint64(len(categoriesList))
+	total := uint64(len(categories))
 	meta := newMeta(total, req.Limit, req.Skip)
-	rsp := toMap(meta, categoriesList, "categories")
+	rsp := toMap(meta, categories, "categories")
 
 	handleSuccess(ctx, rsp)
 }
 
 // updateCategoryRequest represents a request body for updating a category
 type updateCategoryRequest struct {
-	Name string `json:"name" binding:"omitempty,required" example:"Beverages"`
+	Name string `json:"name" validate:"omitempty,required" example:"Beverages"`
 }
 
 // UpdateCategory godoc
@@ -162,28 +169,29 @@ type updateCategoryRequest struct {
 //	@Param			id						path		uint64					true	"Category ID"
 //	@Param			updateCategoryRequest	body		updateCategoryRequest	true	"Update category request"
 //	@Success		200						{object}	categoryResponse		"Category updated"
-//	@Failure		400						{object}	errorResponse			"Validation error"
-//	@Failure		401						{object}	errorResponse			"Unauthorized error"
-//	@Failure		403						{object}	errorResponse			"Forbidden error"
-//	@Failure		404						{object}	errorResponse			"Data not found error"
-//	@Failure		409						{object}	errorResponse			"Data conflict error"
-//	@Failure		500						{object}	errorResponse			"Internal server error"
+//	@Failure		400						{object}	errorValidResponse			"Validation error"
+//	@Failure		401						{object}	errorValidResponse			"Unauthorized error"
+//	@Failure		403						{object}	errorValidResponse			"Forbidden error"
+//	@Failure		404						{object}	errorValidResponse			"Data not found error"
+//	@Failure		409						{object}	errorValidResponse			"Data conflict error"
+//	@Failure		500						{object}	errorValidResponse			"Internal server error"
 //	@Router			/categories/{id} [put]
-//	@Security		BearerAuth
 func (ch *CategoryHandler) UpdateCategory(ctx *gin.Context) {
 	var req updateCategoryRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		validationError(ctx, err)
+		ch.vs.handleError(ctx, err)
 		return
 	}
 
 	idStr := ctx.Param("id")
 	id, err := stringToUint64(idStr)
 	if err != nil {
-		validationError(ctx, err)
+		ch.vs.handleError(ctx, err)
 		return
 	}
-
+	if !ch.vs.handleValidation(ctx, req) {
+		return
+	}
 	category := domain.Category{
 		ID:   id,
 		Name: req.Name,
@@ -191,7 +199,8 @@ func (ch *CategoryHandler) UpdateCategory(ctx *gin.Context) {
 
 	_, err = ch.svc.UpdateCategory(ctx, &category)
 	if err != nil {
-		handleError(ctx, err)
+		ch.log.Error(err.Error())
+		ch.vs.handledbError(ctx, err)
 		return
 	}
 
@@ -202,7 +211,7 @@ func (ch *CategoryHandler) UpdateCategory(ctx *gin.Context) {
 
 // deleteCategoryRequest represents a request body for deleting a category
 type deleteCategoryRequest struct {
-	ID uint64 `uri:"id" binding:"required,min=1" example:"1"`
+	ID uint64 `uri:"id" validate:"required,min=1" example:"1"`
 }
 
 // DeleteCategory godoc
@@ -213,24 +222,26 @@ type deleteCategoryRequest struct {
 //	@Accept			json
 //	@Produce		json
 //	@Param			id	path		uint64			true	"Category ID"
-//	@Success		200	{object}	response		"Category deleted"
-//	@Failure		400	{object}	errorResponse	"Validation error"
-//	@Failure		401	{object}	errorResponse	"Unauthorized error"
-//	@Failure		403	{object}	errorResponse	"Forbidden error"
-//	@Failure		404	{object}	errorResponse	"Data not found error"
-//	@Failure		500	{object}	errorResponse	"Internal server error"
+//	@Success		200	{object}	categoryResponse		"Category deleted"
+//	@Failure		400	{object}	errorValidResponse	"Validation error"
+//	@Failure		401	{object}	errorValidResponse	"Unauthorized error"
+//	@Failure		403	{object}	errorValidResponse	"Forbidden error"
+//	@Failure		404	{object}	errorValidResponse	"Data not found error"
+//	@Failure		500	{object}	errorValidResponse	"Internal server error"
 //	@Router			/categories/{id} [delete]
-//	@Security		BearerAuth
 func (ch *CategoryHandler) DeleteCategory(ctx *gin.Context) {
 	var req deleteCategoryRequest
 	if err := ctx.ShouldBindUri(&req); err != nil {
-		validationError(ctx, err)
+		ch.vs.handleError(ctx, err)
 		return
 	}
-
+	if !ch.vs.handleValidation(ctx, req) {
+		return
+	}
 	err := ch.svc.DeleteCategory(ctx, req.ID)
 	if err != nil {
-		handleError(ctx, err)
+		ch.log.Error(err.Error())
+		ch.vs.handledbError(ctx, err)
 		return
 	}
 

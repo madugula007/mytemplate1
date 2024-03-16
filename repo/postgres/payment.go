@@ -6,8 +6,10 @@ import (
 
 	"gotemplate/core/domain"
 	"gotemplate/core/port"
+	"gotemplate/logger"
 
 	sq "github.com/Masterminds/squirrel"
+	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -16,18 +18,23 @@ import (
  * and provides an access to the postgres database
  */
 type PaymentRepository struct {
-	db *DB
+	Db  *DB
+	log *logger.Logger
 }
 
 // NewPaymentRepository creates a new payment repository instance
-func NewPaymentRepository(db *DB) *PaymentRepository {
+func NewPaymentRepository(Db *DB, log *logger.Logger) *PaymentRepository {
 	return &PaymentRepository{
-		db,
+		Db,
+		log,
 	}
 }
 
 // CreatePayment creates a new payment record in the database
-func (pr *PaymentRepository) CreatePayment(ctx context.Context, payment *domain.Payment) (*domain.Payment, error) {
+func (pr *PaymentRepository) CreatePayment(gctx *gin.Context, payment *domain.Payment) (*domain.Payment, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	
 	query := psql.Insert("payments").
 		Columns("name", "type", "logo").
 		Values(payment.Name, payment.Type, payment.Logo).
@@ -38,7 +45,7 @@ func (pr *PaymentRepository) CreatePayment(ctx context.Context, payment *domain.
 		return nil, err
 	}
 
-	err = pr.db.QueryRow(ctx, sql, args...).Scan(
+	err = pr.Db.QueryRow(ctx, sql, args...).Scan(
 		&payment.ID,
 		&payment.Name,
 		&payment.Type,
@@ -54,7 +61,10 @@ func (pr *PaymentRepository) CreatePayment(ctx context.Context, payment *domain.
 }
 
 // GetPaymentByID retrieves a payment record from the database by id
-func (pr *PaymentRepository) GetPaymentByID(ctx context.Context, id uint64) (*domain.Payment, error) {
+func (pr *PaymentRepository) GetPaymentByID(gctx *gin.Context, id uint64) (*domain.Payment, error) {
+	
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 	var payment domain.Payment
 
 	query := psql.Select("*").
@@ -67,7 +77,7 @@ func (pr *PaymentRepository) GetPaymentByID(ctx context.Context, id uint64) (*do
 		return nil, err
 	}
 
-	err = pr.db.QueryRow(ctx, sql, args...).Scan(
+	err = pr.Db.QueryRow(ctx, sql, args...).Scan(
 		&payment.ID,
 		&payment.Name,
 		&payment.Type,
@@ -86,7 +96,10 @@ func (pr *PaymentRepository) GetPaymentByID(ctx context.Context, id uint64) (*do
 }
 
 // ListPayments retrieves a list of payments from the database
-func (pr *PaymentRepository) ListPayments(ctx context.Context, skip, limit uint64) ([]domain.Payment, error) {
+func (pr *PaymentRepository) ListPayments(gctx *gin.Context, skip, limit uint64) ([]domain.Payment, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
 	var payment domain.Payment
 	var payments []domain.Payment
 
@@ -101,7 +114,7 @@ func (pr *PaymentRepository) ListPayments(ctx context.Context, skip, limit uint6
 		return nil, err
 	}
 
-	rows, err := pr.db.Query(ctx, sql, args...)
+	rows, err := pr.Db.Query(ctx, sql, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -126,7 +139,10 @@ func (pr *PaymentRepository) ListPayments(ctx context.Context, skip, limit uint6
 }
 
 // UpdatePayment updates a payment record in the database
-func (pr *PaymentRepository) UpdatePayment(ctx context.Context, payment *domain.Payment) (*domain.Payment, error) {
+func (pr *PaymentRepository) UpdatePayment(gctx *gin.Context, payment *domain.Payment) (*domain.Payment, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	
 	name := nullString(payment.Name)
 	paymentType := nullString(string(payment.Type))
 	logo := nullString(payment.Logo)
@@ -144,7 +160,7 @@ func (pr *PaymentRepository) UpdatePayment(ctx context.Context, payment *domain.
 		return nil, err
 	}
 
-	err = pr.db.QueryRow(ctx, sql, args...).Scan(
+	err = pr.Db.QueryRow(ctx, sql, args...).Scan(
 		&payment.ID,
 		&payment.Name,
 		&payment.Type,
@@ -160,7 +176,10 @@ func (pr *PaymentRepository) UpdatePayment(ctx context.Context, payment *domain.
 }
 
 // DeletePayment deletes a payment record from the database by id
-func (pr *PaymentRepository) DeletePayment(ctx context.Context, id uint64) error {
+func (pr *PaymentRepository) DeletePayment(gctx *gin.Context, id uint64) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	
 	query := psql.Delete("payments").
 		Where(sq.Eq{"id": id})
 
@@ -169,7 +188,7 @@ func (pr *PaymentRepository) DeletePayment(ctx context.Context, id uint64) error
 		return err
 	}
 
-	_, err = pr.db.Exec(ctx, sql, args...)
+	_, err = pr.Db.Exec(ctx, sql, args...)
 	if err != nil {
 		return err
 	}

@@ -2,10 +2,14 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"os"
+
+	//"os"
+	"gotemplate/config"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -17,14 +21,24 @@ type DB struct {
 	*pgxpool.Pool
 }
 
+type DBInterface interface {
+	Close()
+	WithTx(ctx context.Context, fn func(tx pgx.Tx) error, levels ...pgx.TxIsoLevel) error
+	ReadTx(ctx context.Context, fn func(tx pgx.Tx) error) error
+	// You might have other methods that you want to expose through the interface
+}
+
+var _ DBInterface = (*DB)(nil)
+
 // NewDB creates a new PostgreSQL database instance
-func NewDB(ctx context.Context) (*DB, error) {
-	dsn := fmt.Sprintf("user=%s password=%s host=%s port=%s dbname=%s sslmode=disable pool_max_conns=20",
-		os.Getenv("DB_USERNAME"),
-		os.Getenv("DB_PASSWORD"),
-		os.Getenv("DB_HOST"),
-		os.Getenv("DB_PORT"),
-		os.Getenv("DB_DATABASE"),
+func NewDB(ctx context.Context, c config.Econfig) (*DB, error) {
+	dsn := fmt.Sprintf("user=%s password=%s host=%s port=%s dbname=%s  sslmode=disable",
+		c.DBUsername(),
+		c.DBPassword(),
+		c.DBHost(),
+		c.DBPort(),
+		c.DBDatabase(),
+	
 	)
 
 	config, err := pgxpool.ParseConfig(dsn)
@@ -32,20 +46,11 @@ func NewDB(ctx context.Context) (*DB, error) {
 		return nil, err
 	}
 
-	/* Remember to change these values according to our need and placing these
-			values in config.yaml
-			Longer MaxConnIdleTime values can result in connections being kept open for a longer duration, potentially utilizing more resources
-			If application has consistent and steady traffic .. consider for shorter MaxConnIdleTime
-		MaxConnLifetime:maximum amount of time a connection can be open before the pool considers it eligible for closing
-	Longer MaxConnLifetime values allow connections to be reused for a more extended period, reducing the overhead of establishing new connections.
-	Extremely long MaxConnLifetime is not preferable.Longer MaxConnLifetime utilises more resources.
-	Adjust all parameters in production after monitoring application's performance.
-
-	*/
-	config.MaxConns = 10                      // Maximum number of connections in the pool.
-	config.MinConns = 3                       // Minimum number of connections to keep in the pool.
-	config.MaxConnLifetime = 10 * time.Minute // Maximum lifetime of a connection.
-	config.MaxConnIdleTime = 3 * time.Minute  // Maximum idle time of a connection in the pool.
+	
+	config.MaxConns = int32(c.MaxConns())                                     // Maximum number of connections in the pool.
+	config.MinConns = int32(c.MinConns())                                     // Minimum number of connections to keep in the pool.
+	config.MaxConnLifetime = time.Duration(c.MaxConnLifetime()) * time.Minute // Maximum lifetime of a connection.
+	config.MaxConnIdleTime = time.Duration(c.MaxConnIdleTime()) * time.Minute // Maximum idle time of a connection in the pool.
 
 	db, err := pgxpool.New(ctx, config.ConnString())
 	if err != nil {
@@ -65,4 +70,58 @@ func NewDB(ctx context.Context) (*DB, error) {
 // Close closes the database connection
 func (db *DB) Close() {
 	db.Pool.Close()
+}
+
+func (db *DB) WithTx(ctx context.Context, fn func(tx pgx.Tx) error, levels ...pgx.TxIsoLevel) error {
+	var level pgx.TxIsoLevel
+	if len(levels) > 0 {
+		level = levels[0]
+	} else {
+		level = pgx.ReadCommitted // Default value
+	}
+	return db.inTx(ctx, level, "", fn)
+}
+
+func (db *DB) ReadTx(ctx context.Context, fn func(tx pgx.Tx) error) error {
+	return db.inTx(ctx, pgx.ReadCommitted, pgx.ReadOnly, fn)
+
+}
+
+func (db *DB) inTx(ctx context.Context, level pgx.TxIsoLevel, access pgx.TxAccessMode,
+	fn func(tx pgx.Tx) error) (err error) {
+
+	conn, errAcq := db.Pool.Acquire(ctx)
+	if errAcq != nil {
+		return fmt.Errorf("acquiring connection: %w", errAcq)
+	}
+	defer conn.Release()
+
+	opts := pgx.TxOptions{
+		IsoLevel:   level,
+		AccessMode: access,
+	}
+
+	tx, errBegin := conn.BeginTx(ctx, opts)
+	if errBegin != nil {
+		return fmt.Errorf("begin tx: %w", errBegin)
+	}
+
+	defer func() {
+		errRollback := tx.Rollback(ctx)
+		if !(errRollback == nil || errors.Is(errRollback, pgx.ErrTxClosed)) {
+			err = errRollback
+		}
+	}()
+
+	if err := fn(tx); err != nil {
+		if errRollback := tx.Rollback(ctx); errRollback != nil {
+			return fmt.Errorf("rollback tx: %v (original: %w)", errRollback, err)
+		}
+		return err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit tx: %w", err)
+	}
+	return nil
 }

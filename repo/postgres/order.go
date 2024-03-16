@@ -6,8 +6,10 @@ import (
 
 	"gotemplate/core/domain"
 	"gotemplate/core/port"
+	"gotemplate/logger"
 
 	sq "github.com/Masterminds/squirrel"
+	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -16,27 +18,33 @@ import (
  * and provides an access to the postgres database
  */
 type OrderRepository struct {
-	db *DB
+	Db *DB
+	log *logger.Logger
 }
 
 // NewOrderRepository creates a new order repository instance
-func NewOrderRepository(db *DB) *OrderRepository {
+func NewOrderRepository(Db *DB,log *logger.Logger) *OrderRepository {
 	return &OrderRepository{
-		db,
+		Db,
+		log,
 	}
 }
 
 // CreateOrder creates a new order in the database
-func (or *OrderRepository) CreateOrder(ctx context.Context, order *domain.Order) (*domain.Order, error) {
+func (or *OrderRepository) CreateOrder(gctx *gin.Context, order *domain.Order) (*domain.Order, error) {
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 	var product domain.Product
 	var products []domain.OrderProduct
 
+	
 	orderQuery := psql.Insert("orders").
 		Columns("user_id", "payment_id", "customer_name", "total_price", "total_paid", "total_return").
 		Values(order.UserID, order.PaymentID, order.CustomerName, order.TotalPrice, order.TotalPaid, order.TotalReturn).
 		Suffix("RETURNING *")
 
-	err := pgx.BeginFunc(ctx, or.db, func(tx pgx.Tx) error {
+	err := pgx.BeginFunc(ctx, or.Db, func(tx pgx.Tx) error {
 		sql, args, err := orderQuery.ToSql()
 		if err != nil {
 			return err
@@ -119,7 +127,10 @@ func (or *OrderRepository) CreateOrder(ctx context.Context, order *domain.Order)
 }
 
 // GetOrderByID gets an order by ID from the database
-func (or *OrderRepository) GetOrderByID(ctx context.Context, id uint64) (*domain.Order, error) {
+func (or *OrderRepository) GetOrderByID(gctx *gin.Context, id uint64) (*domain.Order, error) {
+	
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 	var order domain.Order
 	var orderProduct domain.OrderProduct
 
@@ -132,7 +143,7 @@ func (or *OrderRepository) GetOrderByID(ctx context.Context, id uint64) (*domain
 		From("order_products").
 		Where(sq.Eq{"order_id": id})
 
-	err := pgx.BeginFunc(ctx, or.db, func(tx pgx.Tx) error {
+	err := pgx.BeginFunc(ctx, or.Db, func(tx pgx.Tx) error {
 
 		sql, args, err := orderQuery.ToSql()
 		if err != nil {
@@ -195,7 +206,10 @@ func (or *OrderRepository) GetOrderByID(ctx context.Context, id uint64) (*domain
 }
 
 // ListOrders lists all orders from the database
-func (or *OrderRepository) ListOrders(ctx context.Context, skip, limit uint64) ([]domain.Order, error) {
+func (or *OrderRepository) ListOrders(gctx *gin.Context, skip, limit uint64) ([]domain.Order, error) {
+	
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 	var order domain.Order
 	var orderProduct domain.OrderProduct
 	var orders []domain.Order
@@ -206,7 +220,7 @@ func (or *OrderRepository) ListOrders(ctx context.Context, skip, limit uint64) (
 		Limit(limit).
 		Offset((skip - 1) * limit)
 
-	err := pgx.BeginFunc(ctx, or.db, func(tx pgx.Tx) error {
+	err := pgx.BeginFunc(ctx, or.Db, func(tx pgx.Tx) error {
 		sql, args, err := ordersQuery.ToSql()
 		if err != nil {
 			return err

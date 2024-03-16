@@ -1,6 +1,6 @@
 AppName: go-pos
-AppEnv: test
-#AppEnv: production
+#AppEnv: test
+AppEnv: production
 
 HttpUrl: 127.0.0.1
 HttpPort: 8080

@@ -6,8 +6,10 @@ import (
 
 	"gotemplate/core/domain"
 	"gotemplate/core/port"
+	"gotemplate/logger"
 
 	sq "github.com/Masterminds/squirrel"
+	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -16,19 +18,22 @@ import (
  * and provides an access to the postgres database
  */
 type ProductRepository struct {
-	db *DB
+	Db *DB
+	log *logger.Logger
 }
 
 // NewProductRepository creates a new product repository instance
-func NewProductRepository(db *DB) *ProductRepository {
+func NewProductRepository(Db *DB,log *logger.Logger) *ProductRepository {
 	return &ProductRepository{
-		db,
+		Db,
+		log,
 	}
 }
 
 // CreateProduct creates a new product record in the database
-func (pr *ProductRepository) CreateProduct(ctx context.Context, product *domain.Product) (*domain.Product, error) {
-	
+func (pr *ProductRepository) CreateProduct(gctx *gin.Context, product *domain.Product) (*domain.Product, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 	query := psql.Insert("products").
 		Columns("category_id", "name", "image", "price", "stock").
 		Values(product.CategoryID, product.Name, product.Image, product.Price, product.Stock).
@@ -39,7 +44,7 @@ func (pr *ProductRepository) CreateProduct(ctx context.Context, product *domain.
 		return nil, err
 	}
 
-	err = pr.db.QueryRow(ctx, sql, args...).Scan(
+	err = pr.Db.QueryRow(ctx, sql, args...).Scan(
 		&product.ID,
 		&product.CategoryID,
 		&product.SKU,
@@ -58,7 +63,9 @@ func (pr *ProductRepository) CreateProduct(ctx context.Context, product *domain.
 }
 
 // GetProductByID retrieves a product record from the database by id
-func (pr *ProductRepository) GetProductByID(ctx context.Context, id uint64) (*domain.Product, error) {
+func (pr *ProductRepository) GetProductByID(gctx *gin.Context, id uint64) (*domain.Product, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 	var product domain.Product
 
 	query := psql.Select("*").
@@ -71,7 +78,7 @@ func (pr *ProductRepository) GetProductByID(ctx context.Context, id uint64) (*do
 		return nil, err
 	}
 
-	err = pr.db.QueryRow(ctx, sql, args...).Scan(
+	err = pr.Db.QueryRow(ctx, sql, args...).Scan(
 		&product.ID,
 		&product.CategoryID,
 		&product.SKU,
@@ -93,7 +100,10 @@ func (pr *ProductRepository) GetProductByID(ctx context.Context, id uint64) (*do
 }
 
 // ListProducts retrieves a list of products from the database
-func (pr *ProductRepository) ListProducts(ctx context.Context, search string, categoryId, skip, limit uint64) ([]domain.Product, error) {
+func (pr *ProductRepository) ListProducts(gctx *gin.Context, search string, categoryId, skip, limit uint64) ([]domain.Product, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	
 	var product domain.Product
 	var products []domain.Product
 
@@ -116,7 +126,7 @@ func (pr *ProductRepository) ListProducts(ctx context.Context, search string, ca
 		return nil, err
 	}
 
-	rows, err := pr.db.Query(ctx, sql, args...)
+	rows, err := pr.Db.Query(ctx, sql, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -144,7 +154,10 @@ func (pr *ProductRepository) ListProducts(ctx context.Context, search string, ca
 }
 
 // UpdateProduct updates a product record in the database
-func (pr *ProductRepository) UpdateProduct(ctx context.Context, product *domain.Product) (*domain.Product, error) {
+func (pr *ProductRepository) UpdateProduct(gctx *gin.Context, product *domain.Product) (*domain.Product, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	
 	categoryId := nullUint64(product.CategoryID)
 	name := nullString(product.Name)
 	image := nullString(product.Image)
@@ -166,7 +179,7 @@ func (pr *ProductRepository) UpdateProduct(ctx context.Context, product *domain.
 		return nil, err
 	}
 
-	err = pr.db.QueryRow(ctx, sql, args...).Scan(
+	err = pr.Db.QueryRow(ctx, sql, args...).Scan(
 		&product.ID,
 		&product.CategoryID,
 		&product.SKU,
@@ -185,7 +198,10 @@ func (pr *ProductRepository) UpdateProduct(ctx context.Context, product *domain.
 }
 
 // DeleteProduct deletes a product record from the database by id
-func (pr *ProductRepository) DeleteProduct(ctx context.Context, id uint64) error {
+func (pr *ProductRepository) DeleteProduct(gctx *gin.Context, id uint64) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	
 	query := psql.Delete("products").
 		Where(sq.Eq{"id": id})
 
@@ -194,7 +210,7 @@ func (pr *ProductRepository) DeleteProduct(ctx context.Context, id uint64) error
 		return err
 	}
 
-	_, err = pr.db.Exec(ctx, sql, args...)
+	_, err = pr.Db.Exec(ctx, sql, args...)
 	if err != nil {
 		return err
 	}

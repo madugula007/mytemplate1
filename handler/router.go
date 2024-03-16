@@ -2,12 +2,19 @@ package handler
 
 import (
 	"fmt"
+	"gotemplate/config"
+	_ "gotemplate/docs"
+	"sync/atomic"
+	"github.com/gin-contrib/pprof"
+	//"io"
 	"net/http"
-	"os"
+	//"os"
 	"time"
-
+	
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	swaggerFiles "github.com/swaggo/files"
+	ginSwagger "github.com/swaggo/gin-swagger"
 )
 
 // Router is a wrapper for HTTP router
@@ -15,18 +22,41 @@ type Router struct {
 	*gin.Engine
 }
 
+var isShuttingDown atomic.Value
+
+func init() {
+	isShuttingDown.Store(false)
+}
+
+// SetIsShuttingDown is an exported function that allows other packages to update the isShuttingDown value
+func SetIsShuttingDown(shuttingDown bool) {
+	isShuttingDown.Store(shuttingDown)
+}
+
+func HealthCheckHandler(c *gin.Context) {
+	shuttingDown := isShuttingDown.Load().(bool)
+	if shuttingDown {
+		
+		c.JSON(http.StatusServiceUnavailable, gin.H{"status": "unhealthy"})
+		return
+	}
+	
+	c.JSON(http.StatusOK, gin.H{"status": "healthy"})
+}
+
 // NewRouter creates a new HTTP router
 func NewRouter(
-
+	cfg config.Econfig,
 	userHandler UserHandler,
 	paymentHandler PaymentHandler,
 	categoryHandler CategoryHandler,
 	productHandler ProductHandler,
 	orderHandler OrderHandler,
+	bagHander BagHandler,
 
 ) (*Router, error) {
 	// Disable debug mode and write logs to file in production
-	env := os.Getenv("APP_ENV")
+	env := cfg.AppEnv()
 	if env == "production" {
 		gin.SetMode(gin.ReleaseMode)
 
@@ -67,7 +97,26 @@ func NewRouter(
 	})
 
 	//r.Use( ValidateContentType( []string{"application/json", "application/xml"}   )   )
-	router.Use(gin.LoggerWithFormatter(customLogger), gin.Recovery(), cors.New(config), ValidateContentType([]string{"application/json"}))
+
+	//router.Use(gin.LoggerWithFormatter(customLogger), gin.Recovery(), cors.New(config))
+
+
+
+
+	// if env == "production" {
+	// 	router.Use(gin.LoggerWithFormatter(customLogger), gin.Recovery(), cors.New(config), ValidateContentType([]string{"application/json"}))
+	// }
+	// if env == "development" {
+	// 	router.Use(gin.LoggerWithFormatter(customLogger), gin.Recovery(), cors.New(config), ValidateContentType([]string{"application/json", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8", "text/css,*/*;q=0.1", "application/json,*/*", "*/*"}))
+
+	// }
+
+
+
+
+
+	
+	//router.Use(gin.LoggerWithFormatter(customLogger), gin.Recovery(), cors.New(config))
 
 	//router.Use(gin.LoggerWithFormatter(customLogger), gin.Recovery(), cors.New(config))
 
@@ -85,10 +134,11 @@ func NewRouter(
 		}*/
 
 	// Swagger
-	//router.GET("/docs/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
-
+	router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+	router.GET("/healthz", HealthCheckHandler)
+	pprof.Register(router)
 	v1 := router.Group("/v1")
-	{
+	{ // @Router /users
 		user := v1.Group("/users")
 		{
 			user.POST("/", userHandler.Register)
@@ -102,6 +152,23 @@ func NewRouter(
 
 			}
 		}
+
+		bag := v1.Group("/bags")
+		{
+			bag.GET("/:id", bagHander.GetBag)
+			bag.GET("/", bagHander.ListBags)
+			bag.POST("/", bagHander.InsertBag)
+			bag.POST("/sqrl", bagHander.Bagsquirrel)
+			bag.POST("/pgx", bagHander.Bagspgx)
+			bag.POST("/articles", bagHander.TxBagArticles)
+			bag.POST("/all", bagHander.TxAllArrays)
+			bag.POST("/insertpiece", bagHander.InsertPiece)
+			bag.POST("/updatepiece", bagHander.updatepiece)
+			//bag.POST("/updatepiecereturn", bagHander.updatepiecereturn)
+			bag.POST("/updatepiecetx", bagHander.updatepiecetx)
+
+		}
+
 		payment := v1.Group("/payments")
 		{
 			payment.GET("/", paymentHandler.ListPayments)
@@ -111,9 +178,10 @@ func NewRouter(
 			payment.DELETE("/:id", paymentHandler.DeletePayment)
 
 		}
-
+		// @Router /categories
 		category := v1.Group("/categories")
 		{
+			// @Router /v1/categories/ [get]
 			category.GET("/", categoryHandler.ListCategories)
 			category.GET("/:id", categoryHandler.GetCategory)
 			category.POST("/", categoryHandler.CreateCategory)
@@ -154,6 +222,16 @@ func ValidateContentType(allowedTypes []string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 
 		contentType := c.GetHeader("Content-Type")
+		//var contentType string
+		//contentType = c.GetHeader("Accept")
+		//contentheader := c.ContentType()
+
+		// if "Accept" == c.GetHeader("Accept") {
+		// 	contentType = c.GetHeader("Accept")
+		// }
+		// if "Content-Type" == c.GetHeader("Content-Type") {
+		// 	contentType = c.GetHeader("Content-Type")
+		// }
 
 		// Check if the Content-Type is in the allowedTypes
 		validContentType := false
@@ -164,6 +242,9 @@ func ValidateContentType(allowedTypes []string) gin.HandlerFunc {
 			}
 		}
 
+		// if contentheader != "application/json" {
+		// 	validContentType = false
+		// }
 		if !validContentType {
 			c.JSON(http.StatusUnsupportedMediaType, gin.H{
 				"success": false,

@@ -6,8 +6,10 @@ import (
 
 	"gotemplate/core/domain"
 	"gotemplate/core/port"
+	"gotemplate/logger"
 
 	sq "github.com/Masterminds/squirrel"
+	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -16,18 +18,24 @@ import (
  * and provides an access to the postgres database
  */
 type CategoryRepository struct {
-	db *DB
+	Db *DB
+	log *logger.Logger
 }
 
 // NewCategoryRepository creates a new category repository instance
-func NewCategoryRepository(db *DB) *CategoryRepository {
+func NewCategoryRepository(Db *DB,log *logger.Logger) *CategoryRepository {
 	return &CategoryRepository{
-		db,
+		Db,
+		log,
 	}
 }
 
 // CreateCategory creates a new category record in the database
-func (cr *CategoryRepository) CreateCategory(ctx context.Context, category *domain.Category) (*domain.Category, error) {
+func (cr *CategoryRepository) CreateCategory(gctx *gin.Context, category *domain.Category) (*domain.Category, error) {
+	
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	
 	query := psql.Insert("categories").
 		Columns("name").
 		Values(category.Name).
@@ -38,7 +46,10 @@ func (cr *CategoryRepository) CreateCategory(ctx context.Context, category *doma
 		return nil, err
 	}
 
-	err = cr.db.QueryRow(ctx, sql, args...).Scan(
+cr.Db.QueryRow(ctx, sql, args...)
+
+
+	err = cr.Db.QueryRow(ctx, sql, args...).Scan(
 		&category.ID,
 		&category.Name,
 		&category.CreatedAt,
@@ -52,7 +63,11 @@ func (cr *CategoryRepository) CreateCategory(ctx context.Context, category *doma
 }
 
 // GetCategoryByID retrieves a category record from the database by id
-func (cr *CategoryRepository) GetCategoryByID(ctx context.Context, id uint64) (*domain.Category, error) {
+func (cr *CategoryRepository) GetCategoryByID(gctx *gin.Context, id uint64) (*domain.Category, error) {
+	
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	
 	var category domain.Category
 
 	query := psql.Select("*").
@@ -65,7 +80,7 @@ func (cr *CategoryRepository) GetCategoryByID(ctx context.Context, id uint64) (*
 		return nil, err
 	}
 
-	err = cr.db.QueryRow(ctx, sql, args...).Scan(
+	err = cr.Db.QueryRow(ctx, sql, args...).Scan(
 		&category.ID,
 		&category.Name,
 		&category.CreatedAt,
@@ -82,7 +97,10 @@ func (cr *CategoryRepository) GetCategoryByID(ctx context.Context, id uint64) (*
 }
 
 // ListCategories retrieves a list of categories from the database
-func (cr *CategoryRepository) ListCategories(ctx context.Context, skip, limit uint64) ([]domain.Category, error) {
+func (cr *CategoryRepository) ListCategories(gctx *gin.Context, skip, limit uint64) ([]domain.Category, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	
 	var category domain.Category
 	var categories []domain.Category
 
@@ -97,7 +115,7 @@ func (cr *CategoryRepository) ListCategories(ctx context.Context, skip, limit ui
 		return nil, err
 	}
 
-	rows, err := cr.db.Query(ctx, sql, args...)
+	rows, err := cr.Db.Query(ctx, sql, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -120,7 +138,10 @@ func (cr *CategoryRepository) ListCategories(ctx context.Context, skip, limit ui
 }
 
 // UpdateCategory updates a category record in the database
-func (cr *CategoryRepository) UpdateCategory(ctx context.Context, category *domain.Category) (*domain.Category, error) {
+func (cr *CategoryRepository) UpdateCategory(gctx *gin.Context, category *domain.Category) (*domain.Category, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	
 	query := psql.Update("categories").
 		Set("name", category.Name).
 		Set("updated_at", time.Now()).
@@ -132,7 +153,7 @@ func (cr *CategoryRepository) UpdateCategory(ctx context.Context, category *doma
 		return nil, err
 	}
 
-	err = cr.db.QueryRow(ctx, sql, args...).Scan(
+	err = cr.Db.QueryRow(ctx, sql, args...).Scan(
 		&category.ID,
 		&category.Name,
 		&category.CreatedAt,
@@ -146,7 +167,11 @@ func (cr *CategoryRepository) UpdateCategory(ctx context.Context, category *doma
 }
 
 // DeleteCategory deletes a category record from the database by id
-func (cr *CategoryRepository) DeleteCategory(ctx context.Context, id uint64) error {
+func (cr *CategoryRepository) DeleteCategory(gctx *gin.Context, id uint64) error {
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
 	query := psql.Delete("categories").
 		Where(sq.Eq{"id": id})
 
@@ -155,7 +180,7 @@ func (cr *CategoryRepository) DeleteCategory(ctx context.Context, id uint64) err
 		return err
 	}
 
-	_, err = cr.db.Exec(ctx, sql, args...)
+	_, err = cr.Db.Exec(ctx, sql, args...)
 	if err != nil {
 		return err
 	}
